@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# 仮想環境 (uv)
+.venv/
+
+# ツールのキャッシュ
+.ruff_cache/
+
+# 生成物
+output.jpg
+
+# OS
+.DS_Store
+
+# モデル（README の手順でダウンロード）
+*.task
+
+# サンプル画像（README の手順でダウンロード）
+image.jpg
