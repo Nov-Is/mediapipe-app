@@ -10,6 +10,7 @@ __pycache__/
 
 # 生成物
 output.jpg
+output.mp4
 
 # OS
 .DS_Store
@@ -17,5 +18,6 @@ output.jpg
 # モデル（README の手順でダウンロード）
 *.task
 
-# サンプル画像（README の手順でダウンロード）
+# サンプル画像・動画（README の手順でダウンロード）
 image.jpg
+video.webm
