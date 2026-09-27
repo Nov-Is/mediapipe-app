@@ -1,13 +1,25 @@
-"""動画から手のランドマークを検出し、点・骨組み・左右ラベルを描画して output.mp4 に保存する。"""
+"""動画から手のランドマークを検出し、点・骨組み・左右ラベルを描画して output_<入力名>.mp4 に保存する。
 
-import cv2
+検出結果（左右・スコア・21点の正規化座標）はフレームごとに output_<入力名>.json に保存する。
+"""
 
 # STEP 1: 必要なモジュールを読み込む
+import argparse
+import json
+import sys
+from pathlib import Path
+
+import cv2
 import mediapipe as mp
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 
 VisionRunningMode = vision.RunningMode
+
+parser = argparse.ArgumentParser(description=__doc__)
+
+parser.add_argument("video", help="入力の動画パス")
+args = parser.parse_args()
 
 # STEP 2: HandLandmarker（手の検出器）の設定を作る
 # - num_hands=2: 最大2つの手を検出する
@@ -19,11 +31,11 @@ options = vision.HandLandmarkerOptions(
 )
 
 # STEP 3: 入力動画を開く
-cap = cv2.VideoCapture("video.webm")
+file_name = args.video
+cap = cv2.VideoCapture(file_name)
 
 if not cap.isOpened():
-    print("エラー：動画ファイルを開けません")
-    exit()
+    sys.exit(f"エラー:{file_name}が開けません")
 
 # 入力動画の情報を取得する（全フレーム共通なのでループの前に1回だけ）
 # fps はタイムスタンプ計算の誤差を防ぐため小数のまま持つ
@@ -31,21 +43,32 @@ width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
 height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 fps = cap.get(cv2.CAP_PROP_FPS)
 
+# 推論結果を保存する入れ物。動画の情報と、フレームごとの検出結果（frames）を持つ
+data = {
+    "file_name": file_name,
+    "width": width,
+    "height": height,
+    "fps": fps,
+    "frames": [],
+}
+
+# 出力ファイル名は入力ファイル名から作る（拡張子は書き出すときに付ける）
+# 例: video.webm → output_video.mp4 / output_video.json
+output_filename = "output_" + Path(file_name).stem
+
 # 出力動画の書き出し先を用意する
 # - fourcc: コーデックを表す4文字を整数に変換したもの（mp4v は .mp4 用の定番）
 # - fps とサイズを入力に合わせることで、同じ速さ・大きさの動画になる
 # - サイズは (幅, 高さ) の順。書き込むフレームと一致しないと何も書かれない
 fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-out = cv2.VideoWriter("output.mp4", fourcc, fps, (width, height))
+out = cv2.VideoWriter(output_filename + ".mp4", fourcc, fps, (width, height))
 
 # VideoWriter は失敗してもエラーを出さないことがあるので、開けたかを確認する
 if not out.isOpened():
-    print(
+    cap.release()
+    sys.exit(
         "エラー：動画ファイルを開けませんでした。設定（解像度やコーデック）を確認してください"
     )
-    cap.release()
-    exit()
-
 
 # STEP 4: 検出器を作り、1フレームずつ検出・描画・書き出しを行う
 # 検出器の作成は重いので、with はループの外で1回だけにする
@@ -72,23 +95,33 @@ with vision.HandLandmarker.create_from_options(options) as detector:
             mp_image, int(frame_num * 1000 / fps)
         )
 
-        frame_num += 1
+        frame_data = {
+            "frame_num": frame_num,
+            "timestamp": int(frame_num * 1000 / fps),
+            "hands": [],
+        }
 
         # 描画（検出された手ごとに処理する）
         # handedness[i] と hand_landmarks[i] は同じ手の情報なので zip で組にする
         for handedness, landmarks in zip(
             detection_result.handedness, detection_result.hand_landmarks
         ):
-            # 21点のランドマークを点として描き、ピクセル座標を x_y_list にためる
-            # 座標は 0〜1 に正規化されているので、幅・高さを掛けてピクセルに直す
+            hand_data = {
+                "hand_direction": handedness[0].category_name,
+                "score": handedness[0].score,
+                "landmarks": [],
+            }
+            # 21点の座標をためる
+            # - x_y_list: 描画用のピクセル座標（0〜1 の正規化座標に幅・高さを掛けて直す）
+            # - hand_data["landmarks"]: 保存用の正規化座標（精度を落とさないようそのまま）
             x_y_list = []
             for coordinate in landmarks:
                 format_x, format_y = (
                     int(coordinate.x * width),
                     int(coordinate.y * height),
                 )
-                cv2.circle(frame, (format_x, format_y), 5, (0, 0, 255), thickness=-1)
                 x_y_list.append((format_x, format_y))
+                hand_data["landmarks"].append((coordinate.x, coordinate.y))
 
             # ラベルの位置を決めるため、手を囲む枠の左上（x・y の最小値）を求める
             min_x, min_y = x_y_list[0]
@@ -121,9 +154,21 @@ with vision.HandLandmarker.create_from_options(options) as detector:
                     thickness=2,
                 )
 
+            # 点を描く。線の上に重ねて見やすくするため、線の後に描く
+            for x_y in x_y_list:
+                cv2.circle(frame, x_y, 5, (0, 0, 255), thickness=-1)
+
+            frame_data["hands"].append(hand_data)
+
         # 描画済みのフレームを出力動画に書き込む
         out.write(frame)
 
+        data["frames"].append(frame_data)
+        frame_num += 1
+
+# json書き込み
+with open(output_filename + ".json", "w", encoding="utf-8") as f:
+    json.dump(data, f, ensure_ascii=False, indent=2)
 # 後片付け。VideoWriter を release しないと再生できないファイルになることがある
 cap.release()
 out.release()

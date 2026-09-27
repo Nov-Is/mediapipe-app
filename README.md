@@ -1,6 +1,7 @@
 # MediaPipe Hand Landmarker
 
-MediaPipe で動画（`video.webm`）から手のランドマークを検出し、点・骨組み・左右ラベルを描画して `output.mp4` に保存する。
+MediaPipe で動画（`video.webm`）から手のランドマークを検出し、点・骨組み・左右ラベルを描画して `output_<入力名>.mp4` に保存する。
+検出結果（左右・スコア・21点の正規化座標）は `output_<入力名>.json` に保存する（例: `video.webm` → `output_video.mp4` / `output_video.json`）。
 
 ## モデルとサンプル動画のダウンロード
 
@@ -25,7 +26,7 @@ macOS では mediapipe 1.0.x の HandLandmarker がクラッシュするため�
 
 ```sh
 uv sync
-uv run python hand_landmarker.py
+uv run python hand_landmarker.py video.webm
 ```
 
 ## Docker で実行
@@ -34,8 +35,8 @@ uv run python hand_landmarker.py
 # イメージのビルド
 docker build -t mediapipe-hand .
 
-# カレントディレクトリを /app にマウントして実行（output.mp4 はホスト側に出力される）
-docker run --rm -v "$PWD":/app mediapipe-hand python hand_landmarker.py
+# カレントディレクトリを /app にマウントして実行（出力ファイルはホスト側に書き出される）
+docker run --rm -v "$PWD":/app mediapipe-hand python hand_landmarker.py video.webm
 
 # コンテナに入って作業する場合（画面がないため cv2.imshow は使えない）
 docker run --rm -it -v "$PWD":/app mediapipe-hand

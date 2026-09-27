@@ -10,7 +10,8 @@ __pycache__/
 
 # 生成物
 output.jpg
-output.mp4
+output_*.mp4
+output_*.json
 
 # OS
 .DS_Store
