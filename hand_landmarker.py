@@ -25,9 +25,12 @@ args = parser.parse_args()
 # - num_hands=2: 最大2つの手を検出する
 # - running_mode=VIDEO: 前のフレームの結果を使って手を追跡する動画モード
 #   （このモードでは detect() ではなく detect_for_video() を使う）
-base_options = python.BaseOptions(model_asset_path="hand_landmarker.task")
+# model_path と num_hands は推論条件の記録として JSON にも保存するので変数にしておく
+model_path = "hand_landmarker.task"
+num_hands = 2
+base_options = python.BaseOptions(model_asset_path=model_path)
 options = vision.HandLandmarkerOptions(
-    base_options=base_options, num_hands=2, running_mode=VisionRunningMode.VIDEO
+    base_options=base_options, num_hands=num_hands, running_mode=VisionRunningMode.VIDEO
 )
 
 # STEP 3: 入力動画を開く
@@ -45,10 +48,13 @@ fps = cap.get(cv2.CAP_PROP_FPS)
 
 # 推論結果を保存する入れ物。動画の情報と、フレームごとの検出結果（frames）を持つ
 data = {
+    "mediapipe_version": mp.__version__,
+    "model_path": model_path,
     "file_name": file_name,
     "width": width,
     "height": height,
     "fps": fps,
+    "num_hands": num_hands,
     "frames": [],
 }
 
@@ -101,19 +107,24 @@ with vision.HandLandmarker.create_from_options(options) as detector:
             "hands": [],
         }
 
-        # 描画（検出された手ごとに処理する）
-        # handedness[i] と hand_landmarks[i] は同じ手の情報なので zip で組にする
-        for handedness, landmarks in zip(
-            detection_result.handedness, detection_result.hand_landmarks
+        # 検出された手ごとに、描画と保存用データの作成を行う
+        # handedness[i]・hand_landmarks[i]・hand_world_landmarks[i] は
+        # 同じ手の情報なので zip で組にする
+        for handedness, landmarks, world_landmarks in zip(
+            detection_result.handedness,
+            detection_result.hand_landmarks,
+            detection_result.hand_world_landmarks,
         ):
             hand_data = {
                 "hand_direction": handedness[0].category_name,
                 "score": handedness[0].score,
                 "landmarks": [],
+                "world_landmarks": [],
             }
             # 21点の座標をためる
             # - x_y_list: 描画用のピクセル座標（0〜1 の正規化座標に幅・高さを掛けて直す）
             # - hand_data["landmarks"]: 保存用の正規化座標（精度を落とさないようそのまま）
+            #   z は手首を基準にした相対的な奥行き（小さいほどカメラに近い）
             x_y_list = []
             for coordinate in landmarks:
                 format_x, format_y = (
@@ -121,7 +132,9 @@ with vision.HandLandmarker.create_from_options(options) as detector:
                     int(coordinate.y * height),
                 )
                 x_y_list.append((format_x, format_y))
-                hand_data["landmarks"].append((coordinate.x, coordinate.y))
+                hand_data["landmarks"].append(
+                    (coordinate.x, coordinate.y, coordinate.z)
+                )
 
             # ラベルの位置を決めるため、手を囲む枠の左上（x・y の最小値）を求める
             min_x, min_y = x_y_list[0]
@@ -157,6 +170,13 @@ with vision.HandLandmarker.create_from_options(options) as detector:
             # 点を描く。線の上に重ねて見やすくするため、線の後に描く
             for x_y in x_y_list:
                 cv2.circle(frame, x_y, 5, (0, 0, 255), thickness=-1)
+
+            # 保存用に world landmarks（手の中心を原点とした 3D 座標、単位はメートル）をためる
+            # 描画には使わないので、ここでは保存だけ行う
+            for world_landmark in world_landmarks:
+                hand_data["world_landmarks"].append(
+                    (world_landmark.x, world_landmark.y, world_landmark.z)
+                )
 
             frame_data["hands"].append(hand_data)
 
